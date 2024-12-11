@@ -31,6 +31,10 @@ jobs:
         run: perl -V
       - name: Install Dependencies
         run: curl -fsSL --compressed https://raw.githubusercontent.com/skaji/cpm/main/cpm | perl - install -g --with-develop --with-recommends --show-build-log-on-failure
+        if: matrix.perl-version != '5.8-buster'
+      - name: Install Dependencies
+        run: curl -fsSL --compressed https://raw.githubusercontent.com/skaji/cpm/main/cpm | perl - install -g --with-develop --with-recommends --show-build-log-on-failure --resolver Fixed,CPAN::Meta::Requirements@2.140
+        if: matrix.perl-version == '5.8-buster'
       - name: Run Tests
         run: prove -lr --timer t xt
 
@@ -43,8 +47,8 @@ jobs:
           - perl: /usr/bin/perl
             prove: /usr/bin/prove
             cpm-option: --sudo
-          - perl: /usr/local/bin/perl
-            prove: /usr/local/bin/prove
+          - perl: /opt/homebrew/bin/perl
+            prove: /opt/homebrew/bin/prove
             cpm-option: ''
     steps:
       - uses: actions/checkout@v4

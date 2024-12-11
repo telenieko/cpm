@@ -1,15 +1,17 @@
 #!/usr/bin/env perl
-use 5.28.0;
-use FindBin;
-use lib "$FindBin::Bin/../lib";
+use v5.38;
+use experimental qw(builtin class defer for_list try);
+
 use App::FatPacker::Simple;
-use App::cpm::CLI;
 use Config;
-use File::Path 'remove_tree';
-use Carton::Snapshot;
-use CPAN::Meta::Requirements;
+use FindBin;
 use Getopt::Long ();
+use JSON::XS ();
 use Path::Tiny ();
+
+use lib "$FindBin::Bin/../lib";
+use App::cpm::CLI;
+
 chdir $FindBin::Bin;
 
 =for hint
@@ -26,30 +28,28 @@ Getopt::Long::GetOptions
     "u|update-only" => \my $update_only,
 or exit 1;
 
-sub cpm {
-    App::cpm::CLI->new->run(@_) == 0 or die
+sub cpm (@argv) {
+    App::cpm::CLI->new->run(@argv) == 0 or die
 }
 
-sub fatpack {
-    App::FatPacker::Simple->new->parse_options(@_)->run
+sub fatpack (@argv) {
+    App::FatPacker::Simple->new->parse_options(@argv)->run
 }
 
-sub remove_version_xs {
+sub remove_version_xs () {
     my $arch = $Config{archname};
     my $file = "local/lib/perl5/$arch/version/vxs.pm";
     my $dir  = "local/lib/perl5/$arch/auto/version";
     unlink $file if -f $file;
-    remove_tree $dir if -d $dir;
+    Path::Tiny->new($dir)->remove_tree({ safe => 0 }) if -d $dir;
 }
 
-sub gen_snapshot {
-    my $snapshot = Carton::Snapshot->new(path => "cpanfile.snapshot");
-    my $no_exclude = CPAN::Meta::Requirements->new;
-    $snapshot->find_installs("local", $no_exclude);
-    $snapshot->save;
+sub generate_index (@argv) {
+    my $exit = system "perl-cpan-index-generate", @argv;
+    $exit == 0 or die;
 }
 
-sub git_info {
+sub git_info () {
     my $describe = `git describe --tags --dirty`;
     chomp $describe;
     my $hash = `git rev-parse --short HEAD`;
@@ -58,8 +58,7 @@ sub git_info {
     ($describe, $url);
 }
 
-sub inject_git_info {
-    my ($file, $describe, $url) = @_;
+sub inject_git_info ($file, $describe, $url) {
     my $inject = <<~"___";
     use App::cpm;
     \$App::cpm::GIT_DESCRIBE = '$describe';
@@ -90,11 +89,13 @@ my $exclude = join ",", qw(
     File::Spec
     IPC::Cmd
     Locale::Maketext::Simple
+    MIME::Base32
     Module::Build::Tiny
     Module::CoreList
     Module::Load::Conditional
     Params::Check
     Perl::OSType
+    Term::Table
     Test
     Test2
     Test::Harness
@@ -125,16 +126,16 @@ $copyright
 ___
 
 my @resolver;
-if (-f "cpanfile.snapshot" && !$force && !$test && !$update_only) {
-    @resolver = ("-r", "snapshot", "--no-default-resolvers");
+if (-f "index.txt" && !$force && !$test && !$update_only) {
+    @resolver = ("-r", "02packages,index.txt,https://cpan.metacpan.org/");
 } else {
-    @resolver = ("-r", 'Fixed,CPAN::Meta::Requirements@2.140', "-r", "metadb");
+    @resolver = ("-r", 'Fixed,CPAN::Meta::Requirements@2.140');
 }
 
 warn "Resolver: @resolver\n";
-cpm "install", "--target-perl", $target, @resolver, "--cpmfile", "../cpm.yml";
+cpm "install", "--target-perl", $target, @resolver, "--metafile", "../META.json";
 cpm "install", "--target-perl", $target, @resolver, @extra;
-gen_snapshot if !$test;
+generate_index "local/lib/perl5", "--exclude", $exclude, "--output", "index.txt" if !$test;
 remove_version_xs;
 exit if $update_only;
 
